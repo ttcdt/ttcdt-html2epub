@@ -1,0 +1,306 @@
+#!/bin/sh
+
+# Converts HTML or plain text files to EPUB format
+#
+# ttcdt <dev@triptico.com> 
+# This software is released into the public domain.
+
+VERSION="1.15"
+
+EPUB=""
+SRC=""
+TITLE=""
+AUTHOR=""
+COVER=""
+EPUBLANG="en"
+SUBJECT=""
+CREATOR=""
+PUBLISHER=""
+UUID=""
+URI=""
+BOOKID=""
+INTERACTIVE=""
+USAGE=""
+TITLEPAGE="1"
+
+# parse arguments
+while [ $# -ne 0 ] ; do
+    case $1 in
+    -t)         TITLE="$2"                      ; shift ;;
+    -a)         AUTHOR="$2"                     ; shift ;;
+    -c)         COVER="$2"                      ; shift ;;
+    -l)         EPUBLANG="$2"                   ; shift ;;
+    -s)         SUBJECT="$2"                    ; shift ;;
+    -w)         CREATOR="$2"                    ; shift ;;
+    -p)         PUBLISHER="$2"                  ; shift ;;
+    -u)         UUID="$2"                       ; shift ;;
+    -U)         URI="$2"                        ; shift ;;
+    -I)         INTERACTIVE="1"                         ;;
+    -ntp)       TITLEPAGE=""                            ;;
+    *.epub)     EPUB="$1"                               ;;
+    *.html)     SRC="${SRC} $1"                         ;;
+    *.txt)      SRC="${SRC} $1"                         ;;
+    *)          USAGE="1"                               ;;
+    esac
+
+    shift
+done
+
+[ -z "$EPUB" ] && USAGE="1"
+[ -z "$SRC" ] && USAGE="1"
+
+if [ -n "$USAGE" ] ; then
+    echo "ttcdt-html2epub $VERSION - Converts HTML or txt files to EPUB"
+    echo "ttcdt <dev@triptico.com>"
+    echo
+    echo "Usage: ttcdt-html2epub {epub file} [options] {.html or .txt file(s)}"
+    echo
+    echo "Options:"
+    echo "-t \"title\"            Book title"
+    echo "-a \"author\"           Book author"
+    echo "-s \"subject\"          Book subject"
+    echo "-w \"creator\"          Book creator"
+    echo "-p \"publisher\"        Book publisher"
+    echo "-u \"UUID\"             Book UUID"
+    echo "-U \"URI\"              Book URI"
+    echo "-c cover_image.png    Cover image (PNG format)"
+    echo "-l lang               Language (en, es, fr...)"
+    echo "-I                    Interactive; opens a shell for manual changes"
+    echo "-ntp                  No title page"
+    exit 1
+fi
+
+if ! command -v zip > /dev/null ; then
+    echo "ttcdt-html2epub: you don't have the 'zip' utility installed -- fix that"
+    exit 4
+fi
+
+TOXHTML="cat"
+
+if ! command -v tidy > /dev/null ; then
+    echo "ttcdt-html2epub: recommendation: install the 'tidy' utility"
+else
+    TOXHTML="tidy -q -asxhtml"
+fi
+
+for F in $SRC $COVER ; do
+    if [ ! -f "${F}" ] ; then
+        echo "ttcdt-html2epub: cannot find ${F} -- aborting"
+        exit 2
+    fi
+done
+
+WRKDIR="/tmp/ttcdt-html2epub.$(date +%Y%m%d%H%M%S)"
+
+if command -v mktemp > /dev/null ; then
+    WRKDIR=$(mktemp -d)
+else
+    mkdir "${WRKDIR}"
+fi
+
+if [ ! -d "$WRKDIR" ] ; then
+    echo "ttcdt-html2epub: cannot create working directory -- aborting"
+    exit 3
+fi
+
+[ -z "$TITLE" ] && TITLE="${EPUB}"
+
+echo "Gathering data..."
+
+ID=1
+for F in $SRC ; do
+    O=$(printf "${WRKDIR}/part-%04d.html" "$ID")
+
+    case $F in
+    *.txt)
+        TXTTITLE=$(basename "$F")
+        W="${WRKDIR}/wrk.html"
+
+        {
+            echo "<!DOCTYPE html>"
+            echo '<html xmlns="http://www.w3.org/1999/xhtml">'
+            echo "<head><title>${TXTTITLE}</title></head><body><p>"
+            sed -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/^$/<\/p><p>/' "$F"
+            echo "</p></body></html>"
+        } > "${W}"
+
+        ${TOXHTML} < "${W}" > "${O}"
+        rm -f "${W}"
+        ;;
+    *.html)
+        ${TOXHTML} < "${F}" > "${O}"
+        ;;
+    esac
+
+    ID=$((ID + 1))
+done
+
+if [ -z "$URI" ] ; then
+    if [ -z "$UUID" ] ; then
+        # if the uuidgen utility is installed, generate an UUID
+        if command -v uuidgen > /dev/null ; then
+            UUID="$(uuidgen)"
+        else
+            # no uuidgen? use this UUID pulled from my ass
+            UUID="c5be00f9-932e-4903-8cd9-b4b5939411a6"
+        fi
+    fi
+
+    BOOKID="$UUID"
+else
+    BOOKID="$URI"
+    UUID=""
+fi
+
+[ -n "${COVER}" ] && cp "${COVER}" "${WRKDIR}"
+
+if [ -n "$TITLEPAGE" ] ; then
+    O="${WRKDIR}/titlepage.xhtml"
+    {
+        echo "<?xml version='1.0' encoding='utf-8'?>"
+        echo "<html xmlns='http://www.w3.org/1999/xhtml' xml:lang='${EPUBLANG}'>"
+        echo "<head><title>${TITLE} - ${AUTHOR}</title></head><body>"
+
+        if [ -n "${COVER}" ] ; then
+            echo "<img src='${COVER}'/>"
+        else
+            echo "<h1>$TITLE</h1><h2>$AUTHOR</h2>"
+        fi
+
+        echo "</body></html>"
+    } > "${O}"
+fi
+
+
+mkdir -p "${WRKDIR}/META-INF"
+O="${WRKDIR}/META-INF/container.xml"
+{
+    echo '<?xml version="1.0"?>'
+    echo '<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+    echo '  <rootfiles>'
+    echo '    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>'
+    echo '  </rootfiles>'
+    echo '</container>'
+} > "${O}"
+
+
+O="${WRKDIR}/mimetype"
+printf "application/epub+zip" > "$O"
+
+
+O="${WRKDIR}/content.opf"
+{
+    echo '<?xml version="1.0" encoding="utf-8"?>'
+    echo '<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="BookID">'
+    echo '  <metadata xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:opf="http://www.idpf.org/2007/opf" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:calibre="http://calibre.kovidgoyal.net/2009/metadata" xmlns:dc="http://purl.org/dc/elements/1.1/">'
+    echo "    <dc:language>${EPUBLANG}</dc:language>"
+    echo "    <dc:title>${TITLE}</dc:title>"
+    echo "    <dc:creator opf:role='aut'>${AUTHOR}</dc:creator>"
+
+    [ -n "$UUID" ] && echo "    <dc:identifier id='BookID' opf:scheme='UUID'>urn:uuid:${UUID}</dc:identifier>"
+    [ -n "$URI" ]  && echo "    <dc:identifier id='BookID' opf:scheme='URI'>uri:${URI}</dc:identifier>"
+
+    echo "    <dc:date>$(date +%Y-%m-%d)</dc:date>"
+
+    [ -n "$SUBJECT" ]   && echo "    <dc:subject>${SUBJECT}</dc:subject>"
+    [ -n "$CREATOR" ]   && echo "    <dc:creator>${CREATOR}</dc:creator>"
+    [ -n "$PUBLISHER" ] && echo "    <dc:publisher>${PUBLISHER}</dc:publisher>"
+
+    echo '  </metadata>'
+    echo '  <manifest>'
+
+    [ -n "$COVER" ] &&  echo "    <item href='${COVER}' id='cover' media-type='image/png'/>"
+
+    [ -n "$TITLEPAGE" ] && echo "    <item href='titlepage.xhtml' id='titlepage.xhtml' media-type='application/xhtml+xml'/>"
+
+    for f in "${WRKDIR}"/*.html ; do
+        f=$(basename "$f")
+        echo "    <item href='${f}' id='${f}' media-type='application/xhtml+xml'/>"
+    done
+
+    echo '    <item href="toc.ncx" media-type="application/x-dtbncx+xml" id="ncx"/>'
+    echo '  </manifest>'
+    echo '  <spine toc="ncx">'
+
+    [ -n "$TITLEPAGE" ] && echo "    <itemref idref='titlepage.xhtml'/>"
+
+    for f in "${WRKDIR}"/*.html ; do
+        f=$(basename "$f")
+        echo "    <itemref idref='${f}'/>"
+    done
+
+    echo '  </spine>'
+    echo '  <guide>'
+
+    [ -n "$TITLEPAGE" ] && echo '    <reference href="titlepage.xhtml" type="cover" title="Cover"/>'
+
+    echo '  </guide>'
+    echo '</package>'
+} > "${O}"
+
+
+O="${WRKDIR}/toc.ncx"
+{
+    echo '<?xml version="1.0" encoding="utf-8"?>'
+    echo "<ncx xmlns='http://www.daisy.org/z3986/2005/ncx/' version='2005-1' xml:lang='${EPUBLANG}'>"
+    echo '  <head>'
+    echo "    <meta content='${BOOKID}' name='dtb:uid'/>"
+    echo '    <meta content="2" name="dtb:depth"/>'
+    echo '    <meta content="ttcdt-html2epub" name="dtb:generator"/>'
+    echo '    <meta content="0" name="dtb:totalPageCount"/>'
+    echo '    <meta content="0" name="dtb:maxPageNumber"/>'
+    echo '  </head>'
+    echo '  <docTitle>'
+    echo "    <text>$TITLE - $AUTHOR</text>"
+    echo '  </docTitle>'
+    echo '  <navMap>'
+
+    ID=1
+
+    for f in "${WRKDIR}"/*.html ; do
+        SRCTITLE=$(paste -sd '' "$f" | sed -e 's!^.*<TITLE>!!i' -e 's!</TITLE>.*$!!i')
+        [ -z "$SRCTITLE" ] && SRCTITLE="${ID}"
+
+        f=$(basename "$f")
+        echo "    <navPoint id='${f}' playOrder='${ID}'>"
+        echo "      <navLabel><text>${SRCTITLE}</text></navLabel>"
+        echo "      <content src='${f}'/>"
+        echo "    </navPoint>"
+
+        ID=$((ID + 1))
+    done
+
+    echo '  </navMap>'
+    echo '</ncx>'
+} > "${O}"
+
+WRKFILE="/tmp/ttcdt-html2epub.zip"
+rm -f "${WRKFILE}"
+
+# open in a subshell for the cwd
+(
+    cd "${WRKDIR}" || exit
+
+    if [ -n "$INTERACTIVE" ] ; then
+        echo
+        echo "ttcdt-html2epub interactive mode"
+        echo "--------------------------------"
+        echo
+        echo "This is a subshell inside the folder that contains the"
+        echo "files that will be part of the epub. Modify files as"
+        echo "suited and exit the shell (Ctrl-D) to create the epub."
+        $SHELL
+    fi
+
+    echo "Building .epub file..."
+
+    zip "${WRKFILE}" -X -Z store mimetype
+    zip "${WRKFILE}" -X -r * -x mimetype
+
+    echo "Finished."
+)
+
+mv "${WRKFILE}" "${EPUB}"
+rm -rf "${WRKDIR}"
+
+exit 0

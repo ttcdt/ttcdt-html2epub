@@ -1,0 +1,18 @@
+ttcdt-html2epub - Converts HTML or plain text files to EPUB format
+ttcdt <dev@triptico.com>
+
+This is a tool that converts a set of HTML or plain text files to EPUB
+format (plain text files are converted to HTML on the fly). After, as
+usual, being bored + frustrated by the cumbersome available tools to do
+this apparently trivial operation, this is my approach. It's just a shell
+script. The only mandatory dependency is the `zip' program; if the
+`uuidgen' utility is installed, it's used as well. Also, output quality
+will be much improved if you install the `tidy' tool, because it shall be
+automatically used to ensure your HTML files are XMLized.
+
+The EPUB specification is fucking braindead. Do not be confused with
+all that MIME and content types everywhere: the only supported format
+is fucking XHTML (no support for pure text/html). It's up to you to
+have valid XHTML files (or have the `tidy' tool installed).
+
+Released into the public domain. Use as you want, specially for evil.
