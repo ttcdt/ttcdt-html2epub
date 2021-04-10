@@ -5,7 +5,7 @@
 # ttcdt <dev@triptico.com> 
 # This software is released into the public domain.
 
-VERSION="1.15"
+VERSION="1.16"
 
 EPUB=""
 SRC=""
@@ -257,8 +257,10 @@ O="${WRKDIR}/toc.ncx"
 
     ID=1
 
-    for f in "${WRKDIR}"/*.html ; do
-        SRCTITLE=$(paste -sd '' "$f" | sed -e 's!^.*<TITLE>!!i' -e 's!</TITLE>.*$!!i')
+    for f in ${WRKDIR}/*.html ; do
+        SRCTITLE=$(paste -sd ' ' "$f" | \
+            sed -e 's!^.*<[tT][iI][tT][lL][eE]>!!' \
+                -e 's!</[tT][iI][tT][lL][eE]>.*$!!')
         [ -z "$SRCTITLE" ] && SRCTITLE="${ID}"
 
         f=$(basename "$f")
